@@ -1,7 +1,5 @@
 import sqlite3
 import requests
-from xml.etree import ElementTree
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -12,78 +10,49 @@ from telegram.ext import (
     filters
 )
 
-BOT_TOKEN = "токен"
+BOT_TOKEN = 'токен'
 ADMIN_USER_ID = айди админа
 
 
-# ================== БАЗА ДАННЫХ ==================
+# ================== ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ==================
 def init_db():
-    conn = sqlite3.connect("id.db")
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS Пользователи (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            id_user INTEGER UNIQUE,
-            first_name TEXT,
-            last_name TEXT,
-            user_name TEXT
-            
-        )
-    """)
-    conn.commit()
-    conn.close()
+    connection = sqlite3.connect('id.db')
+    cursor = connection.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS Пользователи (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_user INTEGER UNIQUE,
+        first_name TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        last_name TEXT
+    )
+    ''')
+    connection.commit()
+    connection.close()
 
 
-# ================== КУРС ВАЛЮТ ==================
-def get_currency_rates():
-    url = "https://www.cbr.ru/scripts/XML_daily.asp"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-
-        tree = ElementTree.fromstring(response.content)
-        rates = {}
-
-        for valute in tree.findall("Valute"):
-            char = valute.find("CharCode").text
-            value = float(valute.find("Value").text.replace(",", "."))
-            rates[char] = value
-
-        text = (
-            "💱 Курс валют:\n\n"
-            f"💵 USD: {rates.get('USD', '—')} ₽\n"
-            f"💶 EUR: {rates.get('EUR', '—')} ₽\n"
-            f"💴 CNY: {rates.get('CNY', '—')} ₽\n"
-            f"🇰🇿 KZT: {rates.get('KZT', '—')} ₽"
-        )
-        return text
-
-    except Exception:
-        return "Не удалось получить курс валют"
-
-
-# ================== /start ==================
+# ================== КОМАНДА /start ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    user_id = update.message.from_user.id
 
     keyboard = [
-        [InlineKeyboardButton("Регистрация", callback_data="register")],
-        [InlineKeyboardButton("Изменить данные", callback_data="edit")],
-        [InlineKeyboardButton("Валюта", callback_data="currency")]
+        [InlineKeyboardButton("Регистрация", callback_data='register')],
+        [InlineKeyboardButton("Изменить мои данные", callback_data='edit')]
     ]
 
     if user_id == ADMIN_USER_ID:
         keyboard.append(
-            [InlineKeyboardButton("Все пользователи", callback_data="show_all")]
+            [InlineKeyboardButton("Показать всех пользователей", callback_data='show_all')]
         )
 
+    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
         "Выберите действие:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        reply_markup=reply_markup
     )
 
 
-# ================== КНОПКИ ==================
+# ================== ОБРАБОТКА КНОПОК ==================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -91,45 +60,43 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     user_id = user.id
 
-    conn = sqlite3.connect("id.db")
-    cur = conn.cursor()
-
-    # ---------- ВАЛЮТА ----------
-    if query.data == "currency":
-        await query.edit_message_text(get_currency_rates())
+    connection = sqlite3.connect('id.db')
+    cursor = connection.cursor()
 
     # ---------- РЕГИСТРАЦИЯ ----------
-    elif query.data == "register":
-        cur.execute("SELECT 1 FROM Пользователи WHERE id_user = ?", (user_id,))
-        if cur.fetchone():
-            text = "Вы уже зарегистрированы"
+    elif query.data == 'register':
+        cursor.execute('SELECT 1 FROM Пользователи WHERE id_user = ?', (user_id,))
+        exists = cursor.fetchone()
+
+        if exists:
+            text = "❗ Вы уже зарегистрированы"
         else:
-            cur.execute(
-                "INSERT INTO Пользователи (id_user, first_name, last_name, user_name) VALUES (?, ?, ?, ?)",
+            cursor.execute(
+                'INSERT INTO Пользователи (id_user, first_name, user_name, last_name) VALUES (?, ?, ?, ?)',
                 (
                     user_id,
                     user.first_name,
-                    user.username or "нет",
+                    user.username or "Нетusername",
                     user.last_name or ""
                 )
             )
-            conn.commit()
-            text = "Регистрация успешна!"
+            connection.commit()
+            text = f"✅ Регистрация успешна, {user.first_name}!"
 
-        await query.edit_message_text(text)
+        await query.edit_message_text(text=text)
 
-    # ---------- ВСЕ ПОЛЬЗОВАТЕЛИ ----------
-    elif query.data == "show_all":
+    # ---------- ПРОСМОТР ВСЕХ ----------
+    elif query.data == 'show_all':
         if user_id != ADMIN_USER_ID:
-            await query.edit_message_text("Нет доступа")
+            await query.edit_message_text("⛔ У вас нет прав доступа")
         else:
-            cur.execute("SELECT * FROM Пользователи")
-            users = cur.fetchall()
+            cursor.execute('SELECT * FROM Пользователи')
+            users = cursor.fetchall()
 
             if not users:
-                text = "База пуста"
+                text = "База данных пуста"
             else:
-                text = "Пользователи:\n\n"
+                text = "👥 Все пользователи:\n\n"
                 for u in users:
                     text += (
                         f"ID: {u[1]}\n"
@@ -137,67 +104,66 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"Username: @{u[3]}\n"
                         f"Фамилия: {u[4]}\n"
                         f"{'-'*20}\n"
-)
+                    )
 
-            await query.edit_message_text(text)
+            await query.edit_message_text(text=text)
 
-    # ---------- РЕДАКТИРОВАНИЕ ----------
-    elif query.data == "edit":
-        cur.execute("SELECT 1 FROM Пользователи WHERE id_user = ?", (user_id,))
-        if not cur.fetchone():
-            await query.edit_message_text("Сначала зарегистрируйтесь")
+    # ---------- ИЗМЕНЕНИЕ ДАННЫХ ----------
+    elif query.data == 'edit':
+        cursor.execute('SELECT 1 FROM Пользователи WHERE id_user = ?', (user_id,))
+        exists = cursor.fetchone()
+
+        if not exists:
+            await query.edit_message_text("❗ Сначала зарегистрируйтесь")
         else:
-            context.user_data["edit"] = True
+            context.user_data['edit'] = True
             await query.edit_message_text(
-                "Введите данные:\n\n"
-                "Имя, Фамилия, Username\n\n"
-                "Пример:\nИван, Иванов, ivan123"
+                "✏️ Отправьте новые данные:\n\n"
+                "Имя, username, фамилия"
             )
 
-    conn.close()
+    connection.close()
 
 
-# ================== ОБНОВЛЕНИЕ ДАННЫХ ==================
+# ================== ПОЛУЧЕНИЕ НОВЫХ ДАННЫХ ==================
 async def edit_user_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("edit"):
+    if not context.user_data.get('edit'):
         return
 
     try:
-        first_name, username, last_name = map(str.strip, update.message.text.split(","))
+        first_name, username, last_name = map(str.strip, update.message.text.split(','))
 
-        conn = sqlite3.connect("id.db")
-        cur = conn.cursor()
-        cur.execute(
-            """
+        connection = sqlite3.connect('id.db')
+        cursor = connection.cursor()
+        cursor.execute(
+            '''
             UPDATE Пользователи
-            SET first_name=?, last_name=?, user_name=?
-            WHERE id_user=?
-            """,
-            (first_name, username, last_name, update.effective_user.id)
+            SET first_name = ?, user_name = ?, last_name = ?
+            WHERE id_user = ?
+            ''',
+            (first_name, username, last_name, update.message.from_user.id)
         )
-        conn.commit()
-        conn.close()
+        connection.commit()
+        connection.close()
 
-        context.user_data["edit"] = False
-        await update.message.reply_text("Данные обновлены")
+        context.user_data['edit'] = False
+        await update.message.reply_text("✅ Данные обновлены")
 
     except ValueError:
-        await update.message.reply_text("Неверный формат")
+        await update.message.reply_text("❌ Неверный формат")
 
 
-# ================== ЗАПУСК ==================
+# ================== ЗАПУСК БОТА ==================
 def main():
     init_db()
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, edit_user_data))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, edit_user_data))
-
-    print("Бот запущен")
-    app.run_polling()
+    application.run_polling()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
